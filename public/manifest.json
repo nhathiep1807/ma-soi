@@ -1,0 +1,10 @@
+{
+  "name": "Ma Sói",
+  "short_name": "Ma Sói",
+  "description": "Chơi Ma Sói online cùng bạn bè",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f0a1a",
+  "theme_color": "#0f0a1a",
+  "orientation": "portrait"
+}
