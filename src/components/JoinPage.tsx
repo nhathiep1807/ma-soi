@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Input } from "./ui/Input";
 import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
-import { getSocket, saveSession } from "@/hooks/useSocket";
+import { ensureSocketConnected, saveSession } from "@/hooks/useSocket";
 
 interface Props {
   code: string;
@@ -17,24 +17,32 @@ export function JoinPage({ code }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const handleJoin = () => {
+  const handleJoin = async () => {
     if (!name.trim()) {
       setError("Vui lòng nhập tên");
       return;
     }
     setLoading(true);
-    const socket = getSocket();
-    if (!socket.connected) socket.connect();
-
-    socket.emit("joinRoom", code, name.trim(), ({ success, playerId, error: err }) => {
+    setError("");
+    try {
+      const socket = await ensureSocketConnected();
+      socket.timeout(10000).emit("joinRoom", code, name.trim(), (err, { success, playerId, error: errMsg }) => {
+        setLoading(false);
+        if (err) {
+          setError("Không thể tham gia phòng. Vui lòng thử lại.");
+          return;
+        }
+        if (!success) {
+          setError(errMsg ?? "Không thể tham gia");
+          return;
+        }
+        saveSession(code, playerId!, name.trim());
+        router.push(`/room/${code}`);
+      });
+    } catch (e) {
       setLoading(false);
-      if (!success) {
-        setError(err ?? "Không thể tham gia");
-        return;
-      }
-      saveSession(code, playerId!, name.trim());
-      router.push(`/room/${code}`);
-    });
+      setError(e instanceof Error ? e.message : "Không thể kết nối server");
+    }
   };
 
   return (

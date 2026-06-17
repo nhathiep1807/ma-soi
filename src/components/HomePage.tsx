@@ -6,7 +6,7 @@ import { Moon, Users, QrCode } from "lucide-react";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
 import { Card } from "./ui/Card";
-import { getSocket, saveSession } from "@/hooks/useSocket";
+import { ensureSocketConnected, saveSession } from "@/hooks/useSocket";
 import { QRScanner } from "./QRScanner";
 
 export function HomePage() {
@@ -18,23 +18,31 @@ export function HomePage() {
   const [showScanner, setShowScanner] = useState(false);
   const [mode, setMode] = useState<"menu" | "create" | "join">("menu");
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!name.trim()) {
       setError("Vui lòng nhập tên của bạn");
       return;
     }
     setLoading(true);
     setError("");
-    const socket = getSocket();
-    if (!socket.connected) socket.connect();
-
-    socket.emit("createRoom", name.trim(), ({ roomCode: code, playerId }) => {
-      saveSession(code, playerId, name.trim());
-      router.push(`/room/${code}`);
-    });
+    try {
+      const socket = await ensureSocketConnected();
+      socket.timeout(10000).emit("createRoom", name.trim(), (err, { roomCode: code, playerId }) => {
+        setLoading(false);
+        if (err || !code) {
+          setError("Không thể tạo phòng. Vui lòng thử lại.");
+          return;
+        }
+        saveSession(code, playerId, name.trim());
+        router.push(`/room/${code}`);
+      });
+    } catch (e) {
+      setLoading(false);
+      setError(e instanceof Error ? e.message : "Không thể kết nối server");
+    }
   };
 
-  const handleJoin = () => {
+  const handleJoin = async () => {
     if (!name.trim()) {
       setError("Vui lòng nhập tên của bạn");
       return;
@@ -45,18 +53,26 @@ export function HomePage() {
     }
     setLoading(true);
     setError("");
-    const socket = getSocket();
-    if (!socket.connected) socket.connect();
-
-    socket.emit("joinRoom", roomCode.trim().toUpperCase(), name.trim(), ({ success, playerId, error: err }) => {
+    try {
+      const socket = await ensureSocketConnected();
+      const code = roomCode.trim().toUpperCase();
+      socket.timeout(10000).emit("joinRoom", code, name.trim(), (err, { success, playerId, error: errMsg }) => {
+        setLoading(false);
+        if (err) {
+          setError("Không thể tham gia phòng. Vui lòng thử lại.");
+          return;
+        }
+        if (!success) {
+          setError(errMsg ?? "Không thể tham gia phòng");
+          return;
+        }
+        saveSession(code, playerId!, name.trim());
+        router.push(`/room/${code}`);
+      });
+    } catch (e) {
       setLoading(false);
-      if (!success) {
-        setError(err ?? "Không thể tham gia phòng");
-        return;
-      }
-      saveSession(roomCode.trim().toUpperCase(), playerId!, name.trim());
-      router.push(`/room/${roomCode.trim().toUpperCase()}`);
-    });
+      setError(e instanceof Error ? e.message : "Không thể kết nối server");
+    }
   };
 
   const handleQRScan = (code: string) => {

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { getSocket, loadSession, clearSession } from "@/hooks/useSocket";
+import { ensureSocketConnected, getSocket, loadSession, clearSession } from "@/hooks/useSocket";
 import type { Room } from "@/lib/types";
 import { LobbyView } from "./LobbyView";
 import { HostPlayingView } from "./HostPlayingView";
@@ -20,10 +20,7 @@ export function RoomPage({ code }: Props) {
   const [loading, setLoading] = useState(true);
 
   const setupSocket = useCallback(() => {
-    const socket = getSocket();
-    if (!socket.connected) socket.connect();
-
-    const session = loadSession();
+    let cancelled = false;
 
     const onRoomUpdate = (updatedRoom: Room, pid: string) => {
       setRoom(updatedRoom);
@@ -33,25 +30,40 @@ export function RoomPage({ code }: Props) {
 
     const onError = (msg: string) => setError(msg);
 
-    socket.on("roomUpdate", onRoomUpdate);
-    socket.on("error", onError);
+    void ensureSocketConnected()
+      .then((socket) => {
+        if (cancelled) return;
 
-    if (session && session.roomCode === code) {
-      socket.emit("reconnect", code, session.playerId, ({ success }) => {
-        if (success) {
-          setPlayerId(session.playerId);
+        const session = loadSession();
+        socket.on("roomUpdate", onRoomUpdate);
+        socket.on("error", onError);
+
+        if (session && session.roomCode === code) {
+          socket.emit("reconnect", code, session.playerId, ({ success }) => {
+            if (cancelled) return;
+            if (success) {
+              setPlayerId(session.playerId);
+            } else {
+              clearSession();
+              setLoading(false);
+              setError("Phiên đã hết hạn. Vui lòng tham gia lại.");
+            }
+          });
         } else {
-          clearSession();
           setLoading(false);
-          setError("Phiên đã hết hạn. Vui lòng tham gia lại.");
+          setError("Bạn chưa tham gia phòng này");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLoading(false);
+          setError("Không thể kết nối server game");
         }
       });
-    } else {
-      setLoading(false);
-      setError("Bạn chưa tham gia phòng này");
-    }
 
     return () => {
+      cancelled = true;
+      const socket = getSocket();
       socket.off("roomUpdate", onRoomUpdate);
       socket.off("error", onError);
     };

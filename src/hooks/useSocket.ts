@@ -6,16 +6,57 @@ import type { ClientToServerEvents, Room, ServerToClientEvents } from "@/lib/typ
 
 type GameSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
+const SOCKET_PATH = "/api/socket";
+const CONNECT_TIMEOUT_MS = 10_000;
+
 let socket: GameSocket | null = null;
+
+function getSocketUrl(): string | undefined {
+  const url = process.env.NEXT_PUBLIC_SOCKET_URL?.trim();
+  return url || undefined;
+}
 
 export function getSocket(): GameSocket {
   if (!socket) {
-    socket = io({
-      path: "/api/socket",
+    socket = io(getSocketUrl(), {
+      path: SOCKET_PATH,
       autoConnect: false,
+      transports: ["websocket", "polling"],
     });
   }
   return socket;
+}
+
+export function ensureSocketConnected(timeoutMs = CONNECT_TIMEOUT_MS): Promise<GameSocket> {
+  const s = getSocket();
+  if (s.connected) return Promise.resolve(s);
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("Không thể kết nối server game. Vui lòng thử lại sau."));
+    }, timeoutMs);
+
+    const onConnect = () => {
+      cleanup();
+      resolve(s);
+    };
+
+    const onConnectError = () => {
+      cleanup();
+      reject(new Error("Không thể kết nối server game. Kiểm tra cấu hình NEXT_PUBLIC_SOCKET_URL."));
+    };
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      s.off("connect", onConnect);
+      s.off("connect_error", onConnectError);
+    };
+
+    s.on("connect", onConnect);
+    s.on("connect_error", onConnectError);
+    s.connect();
+  });
 }
 
 export function useSocket() {
